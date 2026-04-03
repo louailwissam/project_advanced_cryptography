@@ -1,10 +1,10 @@
-from crypto_base import AlgorithmeCryptographique
+
 from itertools import combinations
 from collections import defaultdict, Counter
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from crypto_base import AlgorithmeCryptographique
 
 class Vigenere(AlgorithmeCryptographique):
 
