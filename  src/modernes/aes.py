@@ -1,6 +1,6 @@
 from crypto_base import AlgorithmeCryptographique
-# Table S-Box du PDF (AES)
-SBOX = [
+
+SBOX =[
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
     0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
@@ -18,34 +18,27 @@ SBOX = [
     0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ]
-# SBOX inverse générée dynamiquement
+
 INV_SBOX = [0] * 256
 for i, v in enumerate(SBOX): INV_SBOX[v] = i
 
-RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
-
+RCON =[0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
 
 def gmult(a, b):
-    """Multiplication dans le corps de Galois GF(2^8) (PDF 2 p.59)"""
     p = 0
     for _ in range(8):
         if b & 1: p ^= a
         hi_bit_set = a & 0x80
         a <<= 1
-        if hi_bit_set: a ^= 0x11B  # x^8 + x^4 + x^3 + x + 1
+        if hi_bit_set: a ^= 0x11B
         b >>= 1
     return p & 0xFF
 
-
 class AESAlgo(AlgorithmeCryptographique):
-    """ Implémentation AES-128 (sans librairie externe). """
-
     def _text_to_matrix(self, text_bytes):
-        """ Convertit 16 octets en une matrice d'état 4x4 (colonnes d'abord). """
         return [[text_bytes[r + 4 * c] for c in range(4)] for r in range(4)]
 
     def _matrix_to_text(self, matrix):
-        """ Reconvertit la matrice 4x4 en un tableau de 16 octets. """
         return bytes(matrix[r][c] for c in range(4) for r in range(4))
 
     def _sub_bytes(self, state, sbox):
@@ -85,16 +78,15 @@ class AESAlgo(AlgorithmeCryptographique):
                 state[r][c] ^= round_key[r][c]
 
     def _key_expansion(self, key):
-        """ Génère les 11 sous-clés à partir de la clé maître de 16 octets. """
         key_symbols = [key[i:i + 4] for i in range(0, 16, 4)]
         for i in range(4, 4 * 11):
             temp = list(key_symbols[i - 1])
             if i % 4 == 0:
-                temp = [temp[1], temp[2], temp[3], temp[0]]  # RotWord
-                temp = [SBOX[b] for b in temp]  # SubWord
+                temp = [temp[1], temp[2], temp[3], temp[0]]
+                temp =[SBOX[b] for b in temp]
                 temp[0] ^= RCON[i // 4]
             key_symbols.append(bytes(a ^ b for a, b in zip(key_symbols[i - 4], temp)))
-        return [self._text_to_matrix(b"".join(key_symbols[i * 4: (i + 1) * 4])) for i in range(11)]
+        return[self._text_to_matrix(b"".join(key_symbols[i * 4: (i + 1) * 4])) for i in range(11)]
 
     def _encrypt_block(self, block, round_keys):
         state = self._text_to_matrix(block)
@@ -123,20 +115,18 @@ class AESAlgo(AlgorithmeCryptographique):
         return self._matrix_to_text(state)
 
     def chiffrer(self, texte_clair, cle):
-        cle_bytes = cle.encode('utf-8')[:16].ljust(16, b'\0')  # Assure 16 octets
+        cle_bytes = cle.encode('utf-8')[:16].ljust(16, b'\0')
         texte_bytes = texte_clair.encode('utf-8')
 
-        # Padding (remplir pour que ce soit un multiple de 16)
         pad_len = 16 - (len(texte_bytes) % 16)
         texte_bytes += bytes([pad_len] * pad_len)
 
         round_keys = self._key_expansion(cle_bytes)
         chiffre = b""
 
-        # Chiffrement par bloc (Mode ECB basique pour comprendre)
         for i in range(0, len(texte_bytes), 16):
             chiffre += self._encrypt_block(texte_bytes[i:i + 16], round_keys)
-        return chiffre.hex()  # On renvoie en Hexadécimal pour l'affichage
+        return chiffre.hex()
 
     def dechiffrer(self, texte_chiffre, cle):
         cle_bytes = cle.encode('utf-8')[:16].ljust(16, b'\0')
@@ -148,6 +138,5 @@ class AESAlgo(AlgorithmeCryptographique):
         for i in range(0, len(chiffre_bytes), 16):
             clair_bytes += self._decrypt_block(chiffre_bytes[i:i + 16], round_keys)
 
-        # Retirer le Padding
         pad_len = clair_bytes[-1]
         return clair_bytes[:-pad_len].decode('utf-8')
