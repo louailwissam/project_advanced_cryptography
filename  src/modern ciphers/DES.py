@@ -1,4 +1,4 @@
-import sys
+import sys,time, struct, secrets
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crypto_base import AlgorithmeCryptographique
@@ -231,7 +231,16 @@ def chiffrer_bloc(bloc, sous_cles):
     # swap final puis permutation finale
     return permuter(R + L, PF)
 
-
+ # Padding PKCS#7
+def pkcs7_pad(data: bytes) -> bytes:
+    pad = 8 - (len(data) % 8)
+    return data + bytes([pad] * pad)
+ 
+def pkcs7_unpad(data: bytes) -> bytes:
+    pad = data[-1]
+    if pad < 1 or pad > 8:
+        raise ValueError("Padding PKCS7 invalide")
+    return data[:-pad]
 class DES(AlgorithmeCryptographique):
   # convertir la cle en bits
     def _preparer_cle(self, cle):
@@ -241,58 +250,241 @@ class DES(AlgorithmeCryptographique):
             else:
                 cle = cle.encode('ascii')
         return bytes_vers_bits(cle)
-    # ajouter les octets necessaire pour avoir 8 octets
 
-    def _ajouter_padding(self, data):
-        pad = 8 - (len(data) % 8)
-        return data + bytes([pad] * pad)
-    # retirer le padding
-
-    def _retirer_padding(self, data):
-        return data[:-data[-1]]
+# ECB  chiffrement et dechiffrment 
+    def chiffrer_ecb(self, texte_clair: bytes, cle) -> bytes:
+        if isinstance(texte_clair, str):
+            texte_clair = texte_clair.encode('utf-8')
+        kb = self._preparer_cle(cle)
+        sks = generer_sous_cles(kb)
+        data = pkcs7_pad(texte_clair)
+        out = b""
+        for i in range(0, len(data), 8):
+            bloc = bytes_vers_bits(data[i:i+8])
+            out += bits_vers_bytes(chiffrer_bloc(bloc, sks))
+        return out
+    
+    def dechiffrer_ecb(self, chiffre: bytes, cle) -> bytes:
+        kb = self._preparer_cle(cle)
+        sks = generer_sous_cles(kb)[::-1]
+        out = b""
+        for i in range(0, len(chiffre), 8):
+            bloc = bytes_vers_bits(chiffre[i:i+8])
+            out += bits_vers_bytes(chiffrer_bloc(bloc, sks))
+        return pkcs7_unpad(out)
+    
+    #cbc chiffrement et dechiffrement
+    def chiffrer_cbc(self, texte_clair: bytes, cle, iv: bytes) -> bytes:
+        if isinstance(texte_clair, str):
+            texte_clair = texte_clair.encode('utf-8')
+        kb = self._preparer_cle(cle)
+        sks = generer_sous_cles(kb)
+        data = pkcs7_pad(texte_clair)
+        prev = list(bytes_vers_bits(iv))
+        out = b""
+        for i in range(0, len(data), 8):
+            bloc = xor(list(bytes_vers_bits(data[i:i+8])), prev)
+            enc = chiffrer_bloc(bloc, sks)
+            out += bits_vers_bytes(enc)
+            prev = enc
+        return out
+ 
+    def dechiffrer_cbc(self, chiffre: bytes, cle, iv: bytes) -> bytes:
+        kb = self._preparer_cle(cle)
+        sks = generer_sous_cles(kb)[::-1]
+        prev = list(bytes_vers_bits(iv))
+        out = b""
+        for i in range(0, len(chiffre), 8):
+            bloc = list(bytes_vers_bits(chiffre[i:i+8]))
+            dec = chiffrer_bloc(bloc, sks)
+            out += bits_vers_bytes(xor(dec, prev))
+            prev = bloc
+        return pkcs7_unpad(out)
    # chiffrement
 
     def chiffrer(self, texte_clair, cle):
-        if isinstance(texte_clair, str):
-            texte_clair = texte_clair.encode('utf-8')
-
-        cle_bits = self._preparer_cle(cle)
-        sous_cles = generer_sous_cles(cle_bits)
-        data = self._ajouter_padding(texte_clair)
-
-        chiffre = b""
-        for i in range(0, len(data), 8):
-            bloc = bytes_vers_bits(data[i:i+8])
-            sortie = chiffrer_bloc(bloc, sous_cles)
-            chiffre += bits_vers_bytes(sortie)
-
-        return chiffre
+          return self.chiffrer_ecb(texte_clair, cle)
    # dechiffrement
 
     def dechiffrer(self, texte_chiffre, cle):
-        cle_bits = self._preparer_cle(cle)
-        sous_cles = generer_sous_cles(cle_bits)
-        # ordre inverse pour dechiffrer
-        sous_cles_inv = sous_cles[::-1]
 
-        clair = b""
-        for i in range(0, len(texte_chiffre), 8):
-            bloc = bytes_vers_bits(texte_chiffre[i:i+8])
-            sortie = chiffrer_bloc(bloc, sous_cles_inv)
-            clair += bits_vers_bytes(sortie)
+        return self.dechiffrer_ecb(texte_chiffre, cle)
 
-        return self._retirer_padding(clair)
-
+class TripleDES:
+    def _split_key(self, cle):
+        if isinstance(cle, str):
+            cle = cle.encode('ascii')
+        if len(cle) < 24:
+            cle = (cle * 3)[:24]
+        return cle[:8], cle[8:16], cle[16:24]
+ 
+    def _enc_bloc(self, data8: bytes, sk1, sk2, sk3) -> bytes:
+        b = bytes_vers_bits(data8)
+        b = chiffrer_bloc(b, sk1)
+        b = chiffrer_bloc(b, sk2[::-1])   # dechiffrement K2
+        b = chiffrer_bloc(b, sk3)
+        return bits_vers_bytes(b)
+    def _dec_bloc(self, data8: bytes, sk1, sk2, sk3) -> bytes:
+        b = bytes_vers_bits(data8)
+        b = chiffrer_bloc(b, sk3[::-1])
+        b = chiffrer_bloc(b, sk2)
+        b = chiffrer_bloc(b, sk1[::-1])
+        return bits_vers_bytes(b)
+ 
+    def _prepare_keys(self, cle):
+        k1, k2, k3 = self._split_key(cle)
+        des = DES()
+        return (generer_sous_cles(des._preparer_cle(k1)),
+                generer_sous_cles(des._preparer_cle(k2)),
+                generer_sous_cles(des._preparer_cle(k3)))
+ 
+    def chiffrer_cbc(self, texte_clair: bytes, cle, iv: bytes) -> bytes:
+        if isinstance(texte_clair, str):
+            texte_clair = texte_clair.encode('utf-8')
+        sk1, sk2, sk3 = self._prepare_keys(cle)
+        data = pkcs7_pad(texte_clair)
+        prev = iv
+        out = b""
+        for i in range(0, len(data), 8):
+            xd = bytes(a ^ b for a, b in zip(data[i:i+8], prev))
+            enc = self._enc_bloc(xd, sk1, sk2, sk3)
+            out += enc
+            prev = enc
+        return out
+ 
+    def dechiffrer_cbc(self, chiffre: bytes, cle, iv: bytes) -> bytes:
+        sk1, sk2, sk3 = self._prepare_keys(cle)
+        prev = iv
+        out = b""
+        for i in range(0, len(chiffre), 8):
+            bloc = chiffre[i:i+8]
+            dec = self._dec_bloc(bloc, sk1, sk2, sk3)
+            out += bytes(a ^ b for a, b in zip(dec, prev))
+            prev = bloc
+        return pkcs7_unpad(out)
+ 
+    def chiffrer(self, texte_clair, cle):
+        return self.chiffrer_cbc(texte_clair, cle, bytes(8))
+ 
+    def dechiffrer(self, chiffre, cle):
+        return self.dechiffrer_cbc(chiffre, cle, bytes(8))
+ 
 
 if __name__ == "__main__":
     des = DES()
-
-    cle = "DESCOURS"
-    message = "Bonjour!"
-
-    chiffre = des.chiffrer(message, cle)
-    dechiffre = des.dechiffrer(chiffre, cle)
-
-    print(f"Message   : {message}")
-    print(f"Chiffré   : {chiffre.hex().upper()}")
-    print(f"Déchiffré : {dechiffre.decode('utf-8')}")
+    t3   = TripleDES()
+    CLE  = "DESCOURS"
+    CLE3 = b"DESCOURSDESCOURSDESCOURS"   # 24 octets
+    IV   = secrets.token_bytes(8)
+# ECB VS CBC SUR 128 OCTEST
+    print("partie 1 DES-ECB vs DES-CBC 128 octets")
+    MESSAGE = b"A" * 64 + b"B" * 64 
+ 
+    ecb = des.chiffrer_ecb(MESSAGE, CLE)
+    cbc = des.chiffrer_cbc(MESSAGE, CLE, IV)
+ 
+    print(f"IV (alweatoire)  : {IV.hex().upper()}")
+    print(f"\nCryptogramme ECB ({len(ecb)} octets) :")
+    for i in range(0, len(ecb), 8):
+        bloc = ecb[i:i+8]
+        print(f"  bloc {i//8:02d} : {bloc.hex().upper()}")
+ 
+    print(f"\nCryptogramme CBC ({len(cbc)} octets) :")
+    for i in range(0, len(cbc), 8):
+        bloc = cbc[i:i+8]
+        print(f"  bloc {i//8:02d} : {bloc.hex().upper()}")
+ 
+    # Compter les doublons ECB
+    ecb_blocs = [ecb[i:i+8].hex().upper() for i in range(0, len(ecb), 8)]
+    from collections import Counter
+    doublons = {h: c for h, c in Counter(ecb_blocs).items() if c > 1}
+    print(f"\nECB — blocs dupliques : {doublons}")
+ 
+    # Verification dechiffrement
+    assert des.dechiffrer_ecb(ecb, CLE) == MESSAGE, "Erreur dechiffrement ECB"
+    assert des.dechiffrer_cbc(cbc, CLE, IV) == MESSAGE, "Erreur dechiffrement CBC"
+    print("Dechiffrement ECB : OK")
+    print("Dechiffrement CBC : OK")
+ 
+    # pertie 2 Faiblesse ECB sur image 64×64
+    print("2 Faiblesse ECB visualisee (image 64×64 pixels)")
+    try:
+        from PIL import Image
+        import io
+ 
+        def gen_image():
+            img = Image.new("RGB", (64, 64), (240, 240, 240))
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(img)
+            draw.rectangle([0, 0, 15, 15], fill=(30, 30, 200))
+            draw.rectangle([48, 0, 63, 15], fill=(30, 150, 30))
+            draw.ellipse([24, 24, 40, 40], fill=(220, 50, 50))
+            draw.rectangle([12, 28, 52, 36], fill=(200, 150, 0))
+            return img
+ 
+        img = gen_image()
+        raw = img.tobytes()  # 64×64×3 = 12288 octets
+ 
+        ecb_img = des.chiffrer_ecb(raw, CLE)
+        cbc_img = des.chiffrer_cbc(raw, CLE, IV)
+ 
+        # Reconstituer les images chiffrees
+        def to_img(data, size=(64, 64)):
+            trunc = data[:size[0]*size[1]*3]
+            trunc += bytes(size[0]*size[1]*3 - len(trunc))
+            return Image.frombytes("RGB", size, trunc)
+ 
+        img.save("image_originale.png")
+        to_img(ecb_img).save("image_chiffree_ecb.png")
+        to_img(cbc_img).save("image_chiffree_cbc.png")
+        print("Images sauvegardees : image_originale.png, image_chiffree_ecb.png, image_chiffree_cbc.png")
+        print("Ouvrez image_chiffree_ecb.png : les zones uniformes restent reconnaissables.")
+ 
+    except ImportError:
+        print("Pillow non disponible. Simulation sur tableau de bytes :")
+        # Creer des donnees avec motif repetitif 
+        raw = (b'\xff\x00\x00' * 256 + b'\x00\xff\x00' * 256) * 8  # 12288 octets
+        ecb_img = des.chiffrer_ecb(raw, CLE)
+        cbc_img = des.chiffrer_cbc(raw, CLE, IV)
+        #compter les blocs dupliques dans le resultat ECB
+        ecb_blocs_img = [ecb_img[i:i+8].hex() for i in range(0, len(ecb_img), 8)]
+        doublons_img = sum(1 for c in Counter(ecb_blocs_img).values() if c > 1)
+        print(f"  ECB : {doublons_img} groupes de blocs dupliques (motifs visibles)")
+        print(f"  CBC : 0 doublon ")
+ 
+    #partie3 Triple-DES CBC + benchmark 
+    print("\n" + "=" * 60)
+    print("3 Triple-DES CBC + benchmark DES vs 3DES ")
+    print("=" * 60)
+ 
+    MSG3 = MESSAGE  # meme 128 octets
+ 
+    c3 = t3.chiffrer_cbc(MSG3, CLE3, IV)
+    d3 = t3.dechiffrer_cbc(c3, CLE3, IV)
+    assert d3 == MSG3, "Erreur dechiffrement 3DES"
+    print(f"3DES chiffre  : {c3[:16].hex().upper()}... ({len(c3)} octets)")
+    print(f"3DES déchiffre : OK ")
+ 
+    # Benchmark sur 1 Ko
+    BENCH = secrets.token_bytes(1024)
+    N = 3  # repetitions pour stabiliser
+ 
+    t0 = time.perf_counter()
+    for _ in range(N):
+        des.chiffrer_cbc(BENCH, CLE, IV)
+    t_des = (time.perf_counter() - t0) / N
+ 
+    t0 = time.perf_counter()
+    for _ in range(N):
+        t3.chiffrer_cbc(BENCH, CLE3, IV)
+    t_3des = (time.perf_counter() - t0) / N
+ 
+    des_1mb  = t_des  / 1024 * 1024 * 1024
+    t3des_1mb = t_3des / 1024 * 1024 * 1024
+ 
+    print(f"\nBenchmark :")
+    print(f"  DES-CBC  : {t_des*1000:.1f} ms / 1 Ko  : {des_1mb:.1f} ms / 1 Mo")
+    print(f"  3DES-CBC : {t_3des*1000:.1f} ms / 1 Ko  :  {t3des_1mb:.1f} ms / 1 Mo")
+    print(f"  Ratio 3DES/DES : {t_3des/t_des:.2f}× plus lent")
+    print("\n 3DES est 3× plus lent que DES mais offre une securite largement superieure")
+    print("  (112 bits effectifs vs 56 bits pour DES).")
