@@ -1,8 +1,13 @@
-from crypto_base import AlgorithmeCryptographique
+import sys
 import os
 
+# Permet de trouver 'crypto_base.py'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from crypto_base import AlgorithmeCryptographique
+
+
 class OneTimePad(AlgorithmeCryptographique):
-    # --- 1. TES FONCTIONS DE BASE (Alphabétique Modulo 26) ---
     def chiffrer(self, texte_clair, cle):
         texte_clair = texte_clair.upper().replace(" ", "")
         cle = cle.upper().replace(" ", "")
@@ -31,19 +36,44 @@ class OneTimePad(AlgorithmeCryptographique):
                 resultat += texte_chiffre[i]
         return resultat
 
-    # --- 2. EXIGENCES DU TP 1 (Exercice 1.4 : Mode Binaire et Vulnérabilité) ---
     def chiffrer_xor_tp(self, texte_clair_bytes, cle_bytes):
         return bytes(a ^ b for a, b in zip(texte_clair_bytes, cle_bytes))
 
     def attaque_reutilisation_cle(self, c1, c2, mot_devine):
-        """ Attaque Crib Dragging """
         m1_xor_m2 = bytes(a ^ b for a, b in zip(c1, c2))
         crib_bytes = mot_devine.encode('utf-8')
-        resultats =[]
+        resultats = []
         for i in range(len(m1_xor_m2) - len(crib_bytes) + 1):
-            extrait = m1_xor_m2[i:i+len(crib_bytes)]
+            extrait = m1_xor_m2[i:i + len(crib_bytes)]
             resultat_xor = bytes(a ^ b for a, b in zip(extrait, crib_bytes))
-            # On vérifie si les caractères sont imprimables (lisibles)
             if all(32 <= b <= 126 or b.isalpha() for b in resultat_xor):
                 resultats.append((i, resultat_xor.decode('utf-8', errors='ignore')))
         return resultats
+
+
+# ==========================================
+# MENU DE TEST (S'exécute si on lance ce fichier)
+# ==========================================
+if __name__ == "__main__":
+    print("=" * 50)
+    print(" TEST TP 1 - ONE-TIME PAD (OTP)")
+    print("=" * 50)
+    algo = OneTimePad()
+
+    msg = input("Texte à chiffrer : ")
+    cle = input(f"Clé (lettres, au moins {len(msg)} caractères) : ")
+    try:
+        chiffre = algo.chiffrer(msg, cle)
+        print(f"\n[+] Chiffré   : {chiffre}")
+        print(f"[+] Déchiffré : {algo.dechiffrer(chiffre, cle)}")
+    except ValueError as e:
+        print(f"Erreur : {e}")
+
+    print("\n--- Vulnérabilité (Crib Dragging) ---")
+    c1 = algo.chiffrer_xor_tp(b"SECRET MESSAGE", b"SUPER CLEF 123")
+    c2 = algo.chiffrer_xor_tp(b"ATTACK AT DAWN", b"SUPER CLEF 123")
+    print("M1='SECRET MESSAGE', M2='ATTACK AT DAWN', chiffrés avec la même clé binaire.")
+    print("Attaque : On cherche le mot 'MESSAGE'...")
+    res = algo.attaque_reutilisation_cle(c1, c2, "MESSAGE")
+    for pos, txt in res:
+        print(f"Position {pos} : Partie de l'autre message révélée = '{txt}'")

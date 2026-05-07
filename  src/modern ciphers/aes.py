@@ -1,6 +1,32 @@
-from crypto_base import AlgorithmeCryptographique
+import sys
+import os
+import time
 
-SBOX =[
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from crypto_base import AlgorithmeCryptographique
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+
+# Import des finalistes si installés
+try:
+    from twofish import Twofish
+
+    HAS_TWOFISH = True
+except ImportError:
+    HAS_TWOFISH = False
+
+try:
+    import serpent
+
+    HAS_SERPENT = True
+except ImportError:
+    HAS_SERPENT = False
+
+# ==============================================================
+# LE CODE AES MATHEMATIQUE "FROM SCRATCH"
+# ==============================================================
+SBOX = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
     0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
@@ -21,8 +47,8 @@ SBOX =[
 
 INV_SBOX = [0] * 256
 for i, v in enumerate(SBOX): INV_SBOX[v] = i
+RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
 
-RCON =[0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
 
 def gmult(a, b):
     p = 0
@@ -33,6 +59,7 @@ def gmult(a, b):
         if hi_bit_set: a ^= 0x11B
         b >>= 1
     return p & 0xFF
+
 
 class AESAlgo(AlgorithmeCryptographique):
     def _text_to_matrix(self, text_bytes):
@@ -83,10 +110,10 @@ class AESAlgo(AlgorithmeCryptographique):
             temp = list(key_symbols[i - 1])
             if i % 4 == 0:
                 temp = [temp[1], temp[2], temp[3], temp[0]]
-                temp =[SBOX[b] for b in temp]
+                temp = [SBOX[b] for b in temp]
                 temp[0] ^= RCON[i // 4]
             key_symbols.append(bytes(a ^ b for a, b in zip(key_symbols[i - 4], temp)))
-        return[self._text_to_matrix(b"".join(key_symbols[i * 4: (i + 1) * 4])) for i in range(11)]
+        return [self._text_to_matrix(b"".join(key_symbols[i * 4: (i + 1) * 4])) for i in range(11)]
 
     def _encrypt_block(self, block, round_keys):
         state = self._text_to_matrix(block)
@@ -117,13 +144,10 @@ class AESAlgo(AlgorithmeCryptographique):
     def chiffrer(self, texte_clair, cle):
         cle_bytes = cle.encode('utf-8')[:16].ljust(16, b'\0')
         texte_bytes = texte_clair.encode('utf-8')
-
         pad_len = 16 - (len(texte_bytes) % 16)
         texte_bytes += bytes([pad_len] * pad_len)
-
         round_keys = self._key_expansion(cle_bytes)
         chiffre = b""
-
         for i in range(0, len(texte_bytes), 16):
             chiffre += self._encrypt_block(texte_bytes[i:i + 16], round_keys)
         return chiffre.hex()
@@ -131,12 +155,92 @@ class AESAlgo(AlgorithmeCryptographique):
     def dechiffrer(self, texte_chiffre, cle):
         cle_bytes = cle.encode('utf-8')[:16].ljust(16, b'\0')
         chiffre_bytes = bytes.fromhex(texte_chiffre)
-
         round_keys = self._key_expansion(cle_bytes)
         clair_bytes = b""
-
         for i in range(0, len(chiffre_bytes), 16):
             clair_bytes += self._decrypt_block(chiffre_bytes[i:i + 16], round_keys)
-
         pad_len = clair_bytes[-1]
         return clair_bytes[:-pad_len].decode('utf-8')
+
+
+# ==========================================
+# MENU DE TEST (S'exécute si on lance ce fichier)
+# ==========================================
+if __name__ == "__main__":
+    print("=" * 50)
+    print(" TEST TP 2 - AES ET FINALISTES NIST")
+    print("=" * 50)
+
+    while True:
+        print("\nMenu :")
+        print("1. Chiffrement AES-128 (Manuel from scratch)")
+        print("2. Effet Avalanche en mode CBC")
+        print("3. Benchmark Finalistes NIST (Rijndael, Twofish, Serpent)")
+        print("4. Quitter")
+
+        choix = input("\nChoix (1-4) : ")
+
+        if choix == '1':
+            algo = AESAlgo()
+            msg = input("Texte à chiffrer : ")
+            cle = input("Clé (16 caractères = 128 bits) : ")
+            if len(cle) != 16:
+                print("Erreur: 16 caractères requis.")
+            else:
+                chiffre = algo.chiffrer(msg, cle)
+                print(f"[+] Chiffré (Hex) : {chiffre}")
+                print(f"[+] Déchiffré     : {algo.dechiffrer(chiffre, cle)}")
+
+        elif choix == '2':
+            cle = os.urandom(16)
+            iv_original = bytearray(os.urandom(16))
+            iv_modifie = bytearray(iv_original)
+            iv_modifie[0] ^= 0x01  # Modifie 1 bit
+
+            message = b"BlocNumeroUn1234BlocNumeroDeux56"
+
+            cipher1 = Cipher(algorithms.AES(cle), modes.CBC(bytes(iv_original)), backend=default_backend())
+            c1 = cipher1.encryptor().update(message)
+
+            cipher2 = Cipher(algorithms.AES(cle), modes.CBC(bytes(iv_modifie)), backend=default_backend())
+            c2 = cipher2.encryptor().update(message)
+
+            diff1 = sum(bin(a ^ b).count('1') for a, b in zip(c1[:16], c2[:16]))
+            diff2 = sum(bin(a ^ b).count('1') for a, b in zip(c1[16:], c2[16:]))
+
+            print(f"\n[Effet Avalanche CBC - 1 bit d'IV modifié]")
+            print(f"Différence Bloc 1 : {diff1}/128 bits changés")
+            print(f"Différence Bloc 2 : {diff2}/128 bits changés")
+
+        elif choix == '3':
+            donnees = os.urandom(1 * 1024 * 1024)  # 1 Mo
+            cle = os.urandom(16)
+            iv = os.urandom(16)
+            print("\nBenchmark sur 1 Mo de données...")
+
+            # AES
+            start = time.time()
+            Cipher(algorithms.AES(cle), modes.CBC(iv), backend=default_backend()).encryptor().update(donnees)
+            print(f"[1] Rijndael (AES) : {time.time() - start:.4f} s")
+
+            # Twofish
+            if HAS_TWOFISH:
+                T = Twofish(cle)
+                start = time.time()
+                b"".join(T.encrypt(donnees[i:i + 16]) for i in range(0, len(donnees), 16))
+                print(f"[2] Twofish        : {time.time() - start:.4f} s")
+            else:
+                print("[2] Twofish        : Non installé")
+
+            # Serpent
+            if HAS_SERPENT:
+                start = time.time()
+                b"".join(serpent.encrypt(donnees[i:i + 16], cle) for i in range(0, len(donnees), 16))
+                print(f"[3] Serpent        : {time.time() - start:.4f} s")
+            else:
+                print("[3] Serpent        : Non installé")
+
+        elif choix == '4':
+            sys.exit(0)
+        else:
+            print("Choix invalide.")

@@ -1,8 +1,14 @@
+import sys
+import os
+
+# Permet de trouver 'crypto_base.py' qui est dans le dossier parent (src)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from crypto_base import AlgorithmeCryptographique
 from collections import Counter
 
+
 class Cesar(AlgorithmeCryptographique):
-    # --- 1. TES FONCTIONS DE BASE ---
     def chiffrer(self, texte_clair, cle):
         cle = int(cle)
         resultat = ""
@@ -18,14 +24,11 @@ class Cesar(AlgorithmeCryptographique):
     def dechiffrer(self, texte_chiffre, cle):
         return self.chiffrer(texte_chiffre, -int(cle))
 
-    # --- 2. EXIGENCES DU TP 1 (Exercice 1.1) ---
     def attaque_force_brute(self, texte_chiffre):
-        """ Teste les 26 clés possibles et cherche des mots français """
-        mots_courants =["LE", "LA", "LES", "DE", "UN", "UNE", "ET", "EST"]
+        mots_courants = ["LE", "LA", "LES", "DE", "UN", "UNE", "ET", "EST"]
         meilleure_cle = 0
         max_score = 0
         meilleur_texte = ""
-
         for k in range(26):
             texte_decode = self.dechiffrer(texte_chiffre, k)
             score = sum(1 for mot in mots_courants if mot in texte_decode.upper())
@@ -33,7 +36,8 @@ class Cesar(AlgorithmeCryptographique):
                 max_score = score
                 meilleure_cle = k
                 meilleur_texte = texte_decode
-
+        print(f"Clé déduite (Force Brute) : {meilleure_cle}")
+        print(f"Texte trouvé : {meilleur_texte}")
         return meilleure_cle, meilleur_texte
 
     def calcul_indice_coincidence(self, texte):
@@ -44,10 +48,25 @@ class Cesar(AlgorithmeCryptographique):
         ic = sum(f * (f - 1) for f in frequences.values()) / (N * (N - 1))
         return ic
 
-    def attaque_frequences(self, texte_chiffre):
-        texte_filtre = ''.join(filter(str.isalpha, texte_chiffre.upper()))
-        frequences = Counter(texte_filtre)
-        lettre_max = frequences.most_common(1)[0][0]
-        # On suppose que la lettre la plus fréquente est le 'E' (ASCII 69)
-        cle_deduite = (ord(lettre_max) - 69) % 26
-        return cle_deduite
+
+# ==========================================
+# MENU DE TEST (S'exécute si on lance ce fichier)
+# ==========================================
+if __name__ == "__main__":
+    print("=" * 50)
+    print(" TEST TP 1 - CHIFFRE DE CÉSAR")
+    print("=" * 50)
+    algo = Cesar()
+
+    msg = input("Texte à chiffrer : ")
+    cle = input("Clé (nombre entier) : ")
+    chiffre = algo.chiffrer(msg, cle)
+    print(f"\n[+] Chiffré   : {chiffre}")
+    print(f"[+] Déchiffré : {algo.dechiffrer(chiffre, cle)}")
+
+    print("\n--- Attaque par Force Brute ---")
+    algo.attaque_force_brute(chiffre)
+
+    print("\n--- Analyse de Fréquences ---")
+    ic = algo.calcul_indice_coincidence(chiffre)
+    print(f"Indice de Coïncidence : {ic:.4f} (Si proche de 0.074 = Français)")
