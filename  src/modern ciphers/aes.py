@@ -1,27 +1,24 @@
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from crypto_base import AlgorithmeCryptographique
 import sys
 import os
 import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from crypto_base import AlgorithmeCryptographique
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-
-# Import des finalistes si installés
 try:
     from twofish import Twofish
-
     HAS_TWOFISH = True
-except ImportError:
+except (ImportError, OSError):
     HAS_TWOFISH = False
 
 try:
-    import serpent
-
+    from pyserpent import Serpent as SerpentCipher
     HAS_SERPENT = True
 except ImportError:
     HAS_SERPENT = False
+
 SBOX = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -42,17 +39,20 @@ SBOX = [
 ]
 
 INV_SBOX = [0] * 256
-for i, v in enumerate(SBOX): INV_SBOX[v] = i
+for i, v in enumerate(SBOX):
+    INV_SBOX[v] = i
 RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36]
 
 
 def gmult(a, b):
     p = 0
     for _ in range(8):
-        if b & 1: p ^= a
+        if b & 1:
+            p ^= a
         hi_bit_set = a & 0x80
         a <<= 1
-        if hi_bit_set: a ^= 0x11B
+        if hi_bit_set:
+            a ^= 0x11B
         b >>= 1
     return p & 0xFF
 
@@ -90,10 +90,14 @@ class AESAlgo(AlgorithmeCryptographique):
     def _inv_mix_columns(self, state):
         for c in range(4):
             s0, s1, s2, s3 = state[0][c], state[1][c], state[2][c], state[3][c]
-            state[0][c] = gmult(0x0e, s0) ^ gmult(0x0b, s1) ^ gmult(0x0d, s2) ^ gmult(0x09, s3)
-            state[1][c] = gmult(0x09, s0) ^ gmult(0x0e, s1) ^ gmult(0x0b, s2) ^ gmult(0x0d, s3)
-            state[2][c] = gmult(0x0d, s0) ^ gmult(0x09, s1) ^ gmult(0x0e, s2) ^ gmult(0x0b, s3)
-            state[3][c] = gmult(0x0b, s0) ^ gmult(0x0d, s1) ^ gmult(0x09, s2) ^ gmult(0x0e, s3)
+            state[0][c] = gmult(0x0e, s0) ^ gmult(
+                0x0b, s1) ^ gmult(0x0d, s2) ^ gmult(0x09, s3)
+            state[1][c] = gmult(0x09, s0) ^ gmult(
+                0x0e, s1) ^ gmult(0x0b, s2) ^ gmult(0x0d, s3)
+            state[2][c] = gmult(0x0d, s0) ^ gmult(
+                0x09, s1) ^ gmult(0x0e, s2) ^ gmult(0x0b, s3)
+            state[3][c] = gmult(0x0b, s0) ^ gmult(
+                0x0d, s1) ^ gmult(0x09, s2) ^ gmult(0x0e, s3)
 
     def _add_round_key(self, state, round_key):
         for r in range(4):
@@ -108,7 +112,8 @@ class AESAlgo(AlgorithmeCryptographique):
                 temp = [temp[1], temp[2], temp[3], temp[0]]
                 temp = [SBOX[b] for b in temp]
                 temp[0] ^= RCON[i // 4]
-            key_symbols.append(bytes(a ^ b for a, b in zip(key_symbols[i - 4], temp)))
+            key_symbols.append(
+                bytes(a ^ b for a, b in zip(key_symbols[i - 4], temp)))
         return [self._text_to_matrix(b"".join(key_symbols[i * 4: (i + 1) * 4])) for i in range(11)]
 
     def _encrypt_block(self, block, round_keys):
@@ -154,7 +159,8 @@ class AESAlgo(AlgorithmeCryptographique):
         round_keys = self._key_expansion(cle_bytes)
         clair_bytes = b""
         for i in range(0, len(chiffre_bytes), 16):
-            clair_bytes += self._decrypt_block(chiffre_bytes[i:i + 16], round_keys)
+            clair_bytes += self._decrypt_block(
+                chiffre_bytes[i:i + 16], round_keys)
         pad_len = clair_bytes[-1]
         return clair_bytes[:-pad_len].decode('utf-8')
 
@@ -195,46 +201,78 @@ if __name__ == "__main__":
 
             message = b"BlocNumeroUn1234BlocNumeroDeux56"
 
-            cipher1 = Cipher(algorithms.AES(cle), modes.CBC(bytes(iv_original)), backend=default_backend())
+            cipher1 = Cipher(algorithms.AES(cle), modes.CBC(
+                bytes(iv_original)), backend=default_backend())
             c1 = cipher1.encryptor().update(message)
 
-            cipher2 = Cipher(algorithms.AES(cle), modes.CBC(bytes(iv_modifie)), backend=default_backend())
+            cipher2 = Cipher(algorithms.AES(cle), modes.CBC(
+                bytes(iv_modifie)), backend=default_backend())
             c2 = cipher2.encryptor().update(message)
 
-            diff1 = sum(bin(a ^ b).count('1') for a, b in zip(c1[:16], c2[:16]))
-            diff2 = sum(bin(a ^ b).count('1') for a, b in zip(c1[16:], c2[16:]))
+            diff1 = sum(bin(a ^ b).count('1')
+                        for a, b in zip(c1[:16], c2[:16]))
+            diff2 = sum(bin(a ^ b).count('1')
+                        for a, b in zip(c1[16:], c2[16:]))
 
             print(f"\n[Effet Avalanche CBC - 1 bit d'IV modifié]")
             print(f"Différence Bloc 1 : {diff1}/128 bits changés")
             print(f"Différence Bloc 2 : {diff2}/128 bits changés")
 
         elif choix == '3':
-            donnees = os.urandom(1 * 1024 * 1024)  # 1 Mo
+            TAILLE_MO = 1 * 1024 * 1024   # 1 Mo  — référence affichée
+            # pyserpent est Pure-Python : on mesure sur 4 Ko (256 blocs) puis on extrapole.
+            TAILLE_SERP = 4 * 1024
+
             cle = os.urandom(16)
             iv = os.urandom(16)
+
+            donnees = os.urandom(TAILLE_MO)
+            donnees_serp = donnees[:TAILLE_SERP]
+
+            # Assurer multiple de 16 pour Twofish / Serpent
+            def pad16(data):
+                r = len(data) % 16
+                return data if r == 0 else data + bytes(16 - r)
+
+            donnees_padded = pad16(donnees)
+            donnees_serp_padded = pad16(donnees_serp)
+
             print("\nBenchmark sur 1 Mo de données...")
 
-            # AES
+            # --- [1] Rijndael (AES) — librairie C optimisée ---
             start = time.time()
-            Cipher(algorithms.AES(cle), modes.CBC(iv), backend=default_backend()).encryptor().update(donnees)
-            print(f"[1] Rijndael (AES) : {time.time() - start:.4f} s")
+            Cipher(algorithms.AES(cle), modes.CBC(iv), backend=default_backend()) \
+                .encryptor().update(donnees_padded)
+            t_aes = time.time() - start
+            print(f"[1] Rijndael (AES) : {t_aes:.4f} s")
 
-            # Twofish
+            # --- [2] Twofish — librairie C (ctypes) ---
+            # Si "Non installé" malgré pip install twofish, voir le commentaire
             if HAS_TWOFISH:
                 T = Twofish(cle)
                 start = time.time()
-                b"".join(T.encrypt(donnees[i:i + 16]) for i in range(0, len(donnees), 16))
-                print(f"[2] Twofish        : {time.time() - start:.4f} s")
+                b"".join(T.encrypt(donnees_padded[i:i + 16])
+                         for i in range(0, len(donnees_padded), 16))
+                t_tf = time.time() - start
+                print(f"[2] Twofish        : {t_tf:.4f} s")
             else:
-                print("[2] Twofish        : Non installé")
+                print("[2] Twofish        : Non installé  →  pip install twofish")
+                print(
+                    "    (Python 3.12/3.13 : patcher twofish.py, voir commentaire en haut)")
 
-            # Serpent
+            # --- [3] Serpent — Pure Python → mesure sur 4 Ko, extrapolation 1 Mo ---
             if HAS_SERPENT:
+                s = SerpentCipher(cle)
                 start = time.time()
-                b"".join(serpent.encrypt(donnees[i:i + 16], cle) for i in range(0, len(donnees), 16))
-                print(f"[3] Serpent        : {time.time() - start:.4f} s")
+                b"".join(s.encrypt(donnees_serp_padded[i:i + 16])
+                         for i in range(0, len(donnees_serp_padded), 16))
+                t_sample = time.time() - start
+                # Extrapolation linéaire : (1 Mo / 4 Ko) × temps mesuré
+                t_serp_extrapole = t_sample * (TAILLE_MO / TAILLE_SERP)
+                print(f"[3] Serpent        : ~{t_serp_extrapole:.4f} s  "
+                      f"(extrapolé depuis {TAILLE_SERP // 1024} Ko — implémentation Pure Python)")
             else:
-                print("[3] Serpent        : Non installé")
+                print("[3] Serpent        : Non installé  →  pip install pyserpent")
 
         elif choix == '4':
             sys.exit(0)
