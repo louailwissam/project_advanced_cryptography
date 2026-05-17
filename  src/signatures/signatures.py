@@ -1,4 +1,3 @@
-from crypto_base import AlgorithmeCryptographique
 from sympy import nextprime, primitive_root
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
@@ -9,7 +8,7 @@ import os
 import hashlib
 import random
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from crypto_base import AlgorithmeCryptographique
 # exercice 1 signature RSA
 
 

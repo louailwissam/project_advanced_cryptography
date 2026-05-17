@@ -1,12 +1,11 @@
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from crypto_base import AlgorithmeCryptographique
 import sys
 import os
 import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+from crypto_base import AlgorithmeCryptographique
 try:
     from twofish import Twofish
     HAS_TWOFISH = True
